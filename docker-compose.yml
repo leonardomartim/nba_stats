@@ -1,0 +1,74 @@
+version: "3.9"
+
+services:
+  # ==========================================
+  # PostgreSQL Database
+  # ==========================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: nba-live-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-nba_live}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-nba_live}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - nba-network
+
+  # ==========================================
+  # Backend API (Bun + Hono + SSE)
+  # ==========================================
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    container_name: nba-live-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PORT: 3001
+      NODE_ENV: production
+      DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-nba_live}
+      NBA_PROVIDER: ${NBA_PROVIDER:-mock}
+      BALLDONTLIE_API_KEY: ${BALLDONTLIE_API_KEY:-}
+      SYNC_INTERVAL_MS: ${SYNC_INTERVAL_MS:-10000}
+      CORS_ORIGIN: "*"
+    ports:
+      - "3001:3001"
+    networks:
+      - nba-network
+
+  # ==========================================
+  # Frontend Web (React + Vite + Nginx)
+  # ==========================================
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    container_name: nba-live-web
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "${WEB_PORT:-3000}:80"
+    networks:
+      - nba-network
+
+volumes:
+  pgdata:
+    driver: local
+
+networks:
+  nba-network:
+    driver: bridge
